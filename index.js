@@ -12,8 +12,16 @@ dbConnect();
 app.set("trust proxy", 1);
 app.use(
   cors({
-    origin: "https://862lht-3000.csb.app",
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // Sửa "OPTION" → "OPTIONS"
+    // Dùng function thay vì string cố định — tự động chấp nhận mọi subdomain *.csb.app
+    // Cần thiết vì CodeSandbox đổi subdomain mỗi lần restart
+    origin: function (origin, callback) {
+      if (!origin || origin.endsWith(".csb.app")) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
   })
 );
