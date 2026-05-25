@@ -4,16 +4,15 @@ const cors = require("cors");
 const dbConnect = require("./db/dbConnect");
 const UserRouter = require("./routes/UserRouter");
 const PhotoRouter = require("./routes/PhotoRouter");
-//const CommentRouter = require("./routes/CommentRouter");
 const AdminRouter = require("./routes/AdminRouter");
-const session = require("express-session");
+const jwt = require("jsonwebtoken");
+const { JWT_SECRET } = require("./config");
 
 dbConnect();
-app.set("trust proxy", 1);
+
 app.use(
   cors({
-    // Dùng function thay vì string cố định — tự động chấp nhận mọi subdomain *.csb.app
-    // Cần thiết vì CodeSandbox đổi subdomain mỗi lần restart
+    // Chấp nhận mọi subdomain *.csb.app — cần thiết vì CodeSandbox đổi domain mỗi lần restart
     origin: function (origin, callback) {
       if (!origin || origin.endsWith(".csb.app")) {
         callback(null, true);
@@ -22,41 +21,36 @@ app.use(
       }
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    credentials: true,
+    // Không cần credentials: true nữa vì không dùng cookie
   })
 );
 app.use(express.json());
 
-app.use(
-  session({
-    secret: "123",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      sameSite: "none",
-      secure: true,
-      maxAge: 24 * 60 * 60 * 1000,
-    },
-  })
-);
-
 app.use("/admin", AdminRouter);
 
-// Middleware kiểm tra đăng nhập cho tất cả route phía dưới (trừ /admin đã mount trước)
+// Middleware xác thực JWT cho tất cả route phía dưới
 app.use((request, response, next) => {
-  // Chỉ dùng session để xác thực — an toàn hơn dùng header/localStorage
-  const sessionUserId = request.session.user_id;
+  // Token được gửi qua header: Authorization: Bearer <token>
+  const authHeader = request.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1]; // Lấy phần sau "Bearer "
 
-  // Nếu KHÔNG có session (chưa đăng nhập) → chặn lại, trả 401
-  if (!sessionUserId) {
+  if (!token) {
     return response
       .status(401)
       .json({ message: "Unauthorized: Ban chua dang nhap" });
   }
 
-  // Đã đăng nhập → đính kèm userId vào request để các router sau dùng nếu cần
-  request.current_user_id = sessionUserId;
-  next();
+  // Xác thực token — nếu hợp lệ thì giải mã ra thông tin user
+  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return response
+        .status(401)
+        .json({ message: "Unauthorized: Token khong hop le" });
+    }
+    // Đính kèm userId vào request để các router sau dùng nếu cần
+    request.current_user_id = decoded.user_id;
+    next();
+  });
 });
 app.use("/user", UserRouter);
 app.use("/photo", PhotoRouter);
