@@ -12,8 +12,8 @@ dbConnect();
 app.set("trust proxy", 1);
 app.use(
   cors({
-    origin: "https://862lht-3000.csb.app", // Cho phép tất cả các môi trường (kể cả CodeSandbox) truy cập
-    methods: ["GET", "POST", "PUT", "DELETE","OPTION"],
+    origin: "https://862lht-3000.csb.app",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // Sửa "OPTION" → "OPTIONS"
     credentials: true,
   })
 );
@@ -34,20 +34,20 @@ app.use(
 
 app.use("/admin", AdminRouter);
 
+// Middleware kiểm tra đăng nhập cho tất cả route phía dưới (trừ /admin đã mount trước)
 app.use((request, response, next) => {
-  const headerUserId = request.headers["x-user-id"];
-
+  // Chỉ dùng session để xác thực — an toàn hơn dùng header/localStorage
   const sessionUserId = request.session.user_id;
 
-  const userId = headerUserId || sessionUserId;
-
-  if (userId) {
+  // Nếu KHÔNG có session (chưa đăng nhập) → chặn lại, trả 401
+  if (!sessionUserId) {
     return response
       .status(401)
-      .json({ message: "Unauthorized : Ban chua dang nhap" });
+      .json({ message: "Unauthorized: Ban chua dang nhap" });
   }
 
-  request.current_user_id = userId;
+  // Đã đăng nhập → đính kèm userId vào request để các router sau dùng nếu cần
+  request.current_user_id = sessionUserId;
   next();
 });
 app.use("/user", UserRouter);

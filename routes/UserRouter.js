@@ -28,8 +28,9 @@ router.get("/:id", async (request, response) => {
       "_id first_name last_name location description occupation"
     );
 
+    // ID hợp lệ nhưng không tồn tại trong DB → 404 Not Found (không phải 400)
     if (!user) {
-      return response.status(400).json({ message: "Khong tim thay nguoi nay" });
+      return response.status(404).json({ message: "Khong tim thay nguoi nay" });
     }
 
     response.status(200).json(user);
