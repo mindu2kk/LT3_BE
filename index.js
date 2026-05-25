@@ -9,11 +9,11 @@ const AdminRouter = require("./routes/AdminRouter");
 const session = require("express-session");
 
 dbConnect();
-
+app.set("trust proxy", 1);
 app.use(
   cors({
     origin: "https://862lht-3000.csb.app", // Cho phép tất cả các môi trường (kể cả CodeSandbox) truy cập
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: ["GET", "POST", "PUT", "DELETE","OPTION"],
     credentials: true,
   })
 );
@@ -24,17 +24,30 @@ app.use(
     secret: "123",
     resave: false,
     saveUninitialized: false,
+    cookie: {
+      sameSite: "none",
+      secure: true,
+      maxAge: 24 * 60 * 60 * 1000,
+    },
   })
 );
 
 app.use("/admin", AdminRouter);
 
 app.use((request, response, next) => {
-  if (!request.session.user_id) {
+  const headerUserId = request.headers["x-user-id"];
+
+  const sessionUserId = request.session.user_id;
+
+  const userId = headerUserId || sessionUserId;
+
+  if (userId) {
     return response
       .status(401)
       .json({ message: "Unauthorized : Ban chua dang nhap" });
   }
+
+  request.current_user_id = userId;
   next();
 });
 app.use("/user", UserRouter);

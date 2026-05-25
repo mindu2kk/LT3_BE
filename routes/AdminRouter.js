@@ -24,15 +24,12 @@ router.post("/login", async (request, response) => {
       login_name: user.login_name,
     });
   } catch (error) {
+    console.error("LỖI CHI TIẾT TẠI API LOGIN:", error);
     response.status(500).json({ message: "Loi may chu" });
   }
 });
 
 router.post("/logout", (request, response) => {
-  if (!request.session.user_id) {
-    return response.status(400).json({ message: "Ban chua dang nhap" });
-  }
-
   request.session.destroy((err) => {
     if (err) {
       return response.status(500).json({ message: "Loi khi dang xuat" });
