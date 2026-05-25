@@ -41,4 +41,56 @@ router.get("/:id", async (request, response) => {
   }
 });
 
+// POST /commentsOfPhoto/:photo_id — thêm comment vào ảnh
+router.post("/commentsOfPhoto/:photo_id", async (request, response) => {
+  const { photo_id } = request.params;
+  const { comment } = request.body;
+
+  // Đề bài yêu cầu: comment rỗng → trả 400
+  if (!comment || comment.trim() === "") {
+    return response.status(400).json({ message: "Comment khong duoc de trong" });
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(photo_id)) {
+    return response.status(400).json({ message: "ID anh khong hop le" });
+  }
+
+  try {
+    // Tìm photo trong DB
+    const photo = await Photo.findById(photo_id);
+    if (!photo) {
+      return response.status(404).json({ message: "Khong tim thay anh" });
+    }
+
+    // Tạo comment mới — user_id lấy từ middleware JWT đã gán vào request
+    const newComment = {
+      comment: comment.trim(),
+      date_time: new Date(),
+      user_id: request.current_user_id,  // được gán bởi middleware auth trong index.js
+    };
+
+    // Đẩy comment vào mảng comments của photo rồi lưu lại DB
+    photo.comments.push(newComment);
+    await photo.save();
+
+    // Lấy comment vừa thêm (phần tử cuối mảng)
+    const savedComment = photo.comments[photo.comments.length - 1];
+
+    // Lấy thông tin user để trả về cho frontend hiển thị ngay — không cần reload
+    const user = await User.findById(request.current_user_id)
+      .select("_id first_name last_name");
+
+    // Trả về comment theo đúng format frontend đang dùng
+    response.status(200).json({
+      _id: savedComment._id,
+      comment: savedComment.comment,
+      date_time: savedComment.date_time,
+      user: user,
+    });
+  } catch (error) {
+    console.error("Loi khi them comment:", error);
+    response.status(500).json({ message: "Loi server" });
+  }
+});
+
 module.exports = router;

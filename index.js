@@ -55,6 +55,7 @@ app.use((request, response, next) => {
 app.use("/user", UserRouter);
 app.use("/photo", PhotoRouter);
 app.use("/photosOfUser", PhotoRouter);
+app.use("/commentsOfPhoto", PhotoRouter); // route POST thêm comment
 
 app.get("/", (request, response) => {
   response.send({ message: "Hello from photo-sharing app API!" });
