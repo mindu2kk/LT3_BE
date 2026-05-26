@@ -12,8 +12,10 @@ router.get("/:id", async (request, response) => {
   }
 
   try {
+    // Lấy photos, KHÔNG dùng populate — tự xử lý thủ công bên dưới
+    // Lý do: populate phụ thuộc vào tên collection khớp chính xác,
+    // data cũ trong DB có thể có user_id trỏ sai collection → populate trả null
     const photos = await Photo.find({ user_id: userId })
-      .populate("comments.user_id", "_id first_name last_name")
       .select("_id user_id file_name date_time comments")
       .lean();
 
@@ -21,21 +23,41 @@ router.get("/:id", async (request, response) => {
       return response.status(200).json([]);
     }
 
+    // Thu thập tất cả user_id xuất hiện trong comments của tất cả photos
+    const userIdSet = new Set();
+    photos.forEach((photo) => {
+      (photo.comments || []).forEach((comment) => {
+        if (comment.user_id) userIdSet.add(comment.user_id.toString());
+      });
+    });
+
+    // Query 1 lần lấy tất cả users liên quan — hiệu quả hơn query từng cái
+    const users = await User.find({
+      _id: { $in: Array.from(userIdSet) }
+    }).select("_id first_name last_name").lean();
+
+    // Tạo map { "user_id_string": userObject } để tra cứu nhanh O(1)
+    const userMap = {};
+    users.forEach((u) => {
+      userMap[u._id.toString()] = u;
+    });
+
+    // Format lại comments — thay user_id bằng thông tin user thực
     const formattedPhotos = photos.map((photo) => {
       if (photo.comments && photo.comments.length > 0) {
         photo.comments = photo.comments.map((comment) => {
+          const userInfo = userMap[comment.user_id?.toString()];
           return {
             _id: comment._id,
             comment: comment.comment,
             date_time: comment.date_time,
-            // populate có thể trả null nếu user_id không tồn tại trong DB
-            // fallback về object rỗng để frontend không crash
-            user: comment.user_id || { _id: null, first_name: "Unknown", last_name: "" },
+            user: userInfo || { _id: null, first_name: "Unknown", last_name: "" },
           };
         });
       }
       return photo;
     });
+
     response.status(200).json(formattedPhotos);
   } catch (error) {
     console.error("Loi khi lay danh sach anh:", error);
@@ -60,31 +82,25 @@ router.post("/:photo_id", async (request, response) => {
   }
 
   try {
-    // Tìm photo trong DB
     const photo = await Photo.findById(photo_id);
     if (!photo) {
       return response.status(404).json({ message: "Khong tim thay anh" });
     }
 
-    // Tạo comment mới — user_id lấy từ middleware JWT đã gán vào request
     const newComment = {
       comment: comment.trim(),
       date_time: new Date(),
-      user_id: request.current_user_id,  // được gán bởi middleware auth trong index.js
+      user_id: request.current_user_id,
     };
 
-    // Đẩy comment vào mảng comments của photo rồi lưu lại DB
     photo.comments.push(newComment);
     await photo.save();
 
-    // Lấy comment vừa thêm (phần tử cuối mảng)
     const savedComment = photo.comments[photo.comments.length - 1];
 
-    // Lấy thông tin user để trả về cho frontend hiển thị ngay — không cần reload
     const user = await User.findById(request.current_user_id)
       .select("_id first_name last_name");
 
-    // Trả về comment theo đúng format frontend đang dùng
     response.status(200).json({
       _id: savedComment._id,
       comment: savedComment.comment,
