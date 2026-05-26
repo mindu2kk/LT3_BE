@@ -98,9 +98,40 @@ router.get("/:id", async (request, response) => {
   }
 });
 
+// POST /photos/new — upload ảnh mới cho user đang đăng nhập
+// PHẢI đặt TRƯỚC router.post("/:photo_id") vì Express khớp route theo thứ tự từ trên xuống
+// Nếu đặt sau, request POST /new sẽ bị /:photo_id bắt mất (photo_id = "new")
+router.post("/new", upload.single("photo"), async (request, response) => {
+  // Đề bài yêu cầu: không có file → trả 400
+  if (!request.file) {
+    return response.status(400).json({ message: "Vui long chon file anh" });
+  }
+
+  try {
+    const newPhoto = new Photo({
+      file_name: request.file.filename,
+      date_time: new Date(),
+      user_id: request.current_user_id,
+      comments: [],
+    });
+
+    await newPhoto.save();
+
+    response.status(200).json({
+      _id: newPhoto._id,
+      file_name: newPhoto.file_name,
+      date_time: newPhoto.date_time,
+      user_id: newPhoto.user_id,
+      comments: [],
+    });
+  } catch (error) {
+    console.error("Loi khi upload anh:", error);
+    response.status(500).json({ message: "Loi server" });
+  }
+});
+
 // POST /commentsOfPhoto/:photo_id — thêm comment vào ảnh
-// Lưu ý: prefix "/commentsOfPhoto" đã bị Express cắt bỏ trước khi vào đây
-// nên chỉ cần "/:photo_id" là đủ
+// Đặt SAU /new để tránh "new" bị hiểu là photo_id
 router.post("/:photo_id", async (request, response) => {
   const { photo_id } = request.params;
   const { comment } = request.body;
@@ -142,42 +173,6 @@ router.post("/:photo_id", async (request, response) => {
     });
   } catch (error) {
     console.error("Loi khi them comment:", error);
-    response.status(500).json({ message: "Loi server" });
-  }
-});
-
-// POST /photos/new — upload ảnh mới cho user đang đăng nhập
-// upload.single("photo") là middleware của multer:
-//   - đọc file từ form-data với field name là "photo"
-//   - lưu file vào thư mục images/ với tên unique
-//   - gán thông tin file vào request.file
-router.post("/new", upload.single("photo"), async (request, response) => {
-  // Đề bài yêu cầu: không có file → trả 400
-  if (!request.file) {
-    return response.status(400).json({ message: "Vui long chon file anh" });
-  }
-
-  try {
-    // Tạo Photo object mới trong DB
-    // file_name chỉ lưu tên file (không lưu full path) — giống format data cũ
-    const newPhoto = new Photo({
-      file_name: request.file.filename,
-      date_time: new Date(),
-      user_id: request.current_user_id, // từ middleware JWT
-      comments: [],
-    });
-
-    await newPhoto.save();
-
-    response.status(200).json({
-      _id: newPhoto._id,
-      file_name: newPhoto.file_name,
-      date_time: newPhoto.date_time,
-      user_id: newPhoto.user_id,
-      comments: [],
-    });
-  } catch (error) {
-    console.error("Loi khi upload anh:", error);
     response.status(500).json({ message: "Loi server" });
   }
 });
