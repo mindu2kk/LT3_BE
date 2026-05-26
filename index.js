@@ -33,6 +33,8 @@ app.use(
 app.use(express.json());
 
 app.use("/admin", AdminRouter);
+// Route đăng ký user — đặt TRƯỚC middleware auth vì người chưa đăng nhập mới cần đăng ký
+app.use("/user", UserRouter);
 
 // Middleware xác thực JWT cho tất cả route phía dưới
 app.use((request, response, next) => {
@@ -58,7 +60,6 @@ app.use((request, response, next) => {
     next();
   });
 });
-app.use("/user", UserRouter);
 app.use("/photo", PhotoRouter);
 app.use("/photos", PhotoRouter);       // route POST /photos/new upload ảnh
 app.use("/photosOfUser", PhotoRouter);

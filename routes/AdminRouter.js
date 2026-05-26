@@ -5,31 +5,34 @@ const jwt = require("jsonwebtoken");
 const { JWT_SECRET } = require("../config");
 
 router.post("/login", async (request, response) => {
-  const login_name = request.body.login_name;
+  const { login_name, password } = request.body;
 
-  // Kiểm tra client có gửi login_name không
   if (!login_name) {
     return response.status(400).json({ message: "Vui long nhap ten dang nhap" });
+  }
+  if (!password) {
+    return response.status(400).json({ message: "Vui long nhap mat khau" });
   }
 
   try {
     const user = await User.findOne({ login_name: login_name });
 
     if (!user) {
-      return response
-        .status(400)
-        .json({ message: "Ten dang nhap khong hop le" });
+      return response.status(400).json({ message: "Ten dang nhap khong hop le" });
     }
 
-    // Tạo JWT token chứa user_id, hết hạn sau 24 giờ
+    // Kiểm tra password — so sánh trực tiếp (đề bài lưu plain text)
+    // User cũ trong DB chưa có password → cho phép login không cần password
+    if (user.password && user.password !== password) {
+      return response.status(400).json({ message: "Mat khau khong dung" });
+    }
+
     const token = jwt.sign(
       { user_id: user._id },
       JWT_SECRET,
       { expiresIn: "24h" }
     );
 
-    // Trả token + thông tin user về cho frontend
-    // Frontend sẽ lưu token vào localStorage và gửi kèm mọi request sau
     response.status(200).json({
       token: token,
       _id: user._id,

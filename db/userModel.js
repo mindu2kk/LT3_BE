@@ -7,6 +7,9 @@ const userSchema = new mongoose.Schema({
   description: { type: String },
   occupation: { type: String },
   login_name: { type: String },
+  // Thêm field password — đề bài yêu cầu lưu password (dạng plain text cho bài này)
+  // Thực tế production nên hash bằng bcrypt, nhưng đề bài không yêu cầu
+  password: { type: String },
 });
 
 module.exports = mongoose.model.Users || mongoose.model("Users", userSchema);

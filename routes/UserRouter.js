@@ -3,6 +3,58 @@ const User = require("../db/userModel");
 const router = express.Router();
 const mongoose = require("mongoose");
 
+// POST /user — đăng ký user mới
+// Đặt TRƯỚC GET /:id để "POST /" không bị nhầm với GET /:id
+router.post("/", async (request, response) => {
+  const { login_name, password, first_name, last_name, location, description, occupation } = request.body;
+
+  // Kiểm tra các field bắt buộc theo đề bài
+  if (!login_name || !login_name.trim()) {
+    return response.status(400).json({ message: "login_name khong duoc de trong" });
+  }
+  if (!password || !password.trim()) {
+    return response.status(400).json({ message: "Password khong duoc de trong" });
+  }
+  if (!first_name || !first_name.trim()) {
+    return response.status(400).json({ message: "First name khong duoc de trong" });
+  }
+  if (!last_name || !last_name.trim()) {
+    return response.status(400).json({ message: "Last name khong duoc de trong" });
+  }
+
+  try {
+    // Kiểm tra login_name đã tồn tại chưa
+    const existing = await User.findOne({ login_name: login_name.trim() });
+    if (existing) {
+      return response.status(400).json({ message: "Ten dang nhap nay da ton tai" });
+    }
+
+    // Tạo user mới
+    const newUser = new User({
+      login_name: login_name.trim(),
+      password: password,       // đề bài lưu plain text, không yêu cầu hash
+      first_name: first_name.trim(),
+      last_name: last_name.trim(),
+      location: location || "",
+      description: description || "",
+      occupation: occupation || "",
+    });
+
+    await newUser.save();
+
+    // Đề bài yêu cầu response phải có login_name
+    response.status(200).json({
+      _id: newUser._id,
+      login_name: newUser.login_name,
+      first_name: newUser.first_name,
+      last_name: newUser.last_name,
+    });
+  } catch (error) {
+    console.error("Loi khi dang ky:", error);
+    response.status(500).json({ message: "Loi server" });
+  }
+});
+
 router.get("/list", async (request, response) => {
   try {
     const usersList = await User.find({}).select("_id first_name last_name");
