@@ -28,7 +28,9 @@ router.get("/:id", async (request, response) => {
             _id: comment._id,
             comment: comment.comment,
             date_time: comment.date_time,
-            user: comment.user_id,
+            // populate có thể trả null nếu user_id không tồn tại trong DB
+            // fallback về object rỗng để frontend không crash
+            user: comment.user_id || { _id: null, first_name: "Unknown", last_name: "" },
           };
         });
       }
