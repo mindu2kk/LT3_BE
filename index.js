@@ -8,7 +8,13 @@ const AdminRouter = require("./routes/AdminRouter");
 const jwt = require("jsonwebtoken");
 const { JWT_SECRET } = require("./config");
 
+const path = require("path");
+
 dbConnect();
+
+// Expose thư mục images để frontend load ảnh qua URL
+// Ví dụ: GET /images/photo.jpg → trả file LT3_BE/images/photo.jpg
+app.use("/images", express.static(path.join(__dirname, "images")));
 
 app.use(
   cors({
@@ -54,8 +60,9 @@ app.use((request, response, next) => {
 });
 app.use("/user", UserRouter);
 app.use("/photo", PhotoRouter);
+app.use("/photos", PhotoRouter);       // route POST /photos/new upload ảnh
 app.use("/photosOfUser", PhotoRouter);
-app.use("/commentsOfPhoto", PhotoRouter); // route POST thêm comment
+app.use("/commentsOfPhoto", PhotoRouter);
 
 app.get("/", (request, response) => {
   response.send({ message: "Hello from photo-sharing app API!" });

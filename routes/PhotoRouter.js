@@ -3,6 +3,39 @@ const Photo = require("../db/photoModel");
 const router = express.Router();
 const User = require("../db/userModel");
 const mongoose = require("mongoose");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+
+// Cấu hình multer — xác định nơi lưu file và tên file
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    // Lưu vào thư mục images/ của backend
+    const uploadDir = path.join(__dirname, "../images");
+    // Tạo thư mục nếu chưa có
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    // Tạo tên file duy nhất: timestamp + random + extension gốc
+    // Ví dụ: 1716700000000_a3f2.jpg
+    const uniqueName = Date.now() + "_" + Math.random().toString(36).slice(2, 6)
+      + path.extname(file.originalname);
+    cb(null, uniqueName);
+  },
+});
+
+// Chỉ chấp nhận file ảnh
+const fileFilter = (req, file, cb) => {
+  const allowed = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+  if (allowed.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error("Chi chap nhan file anh"), false);
+  }
+};
+
+const upload = multer({ storage, fileFilter });
 
 router.get("/:id", async (request, response) => {
   const userId = request.params.id;
@@ -109,6 +142,42 @@ router.post("/:photo_id", async (request, response) => {
     });
   } catch (error) {
     console.error("Loi khi them comment:", error);
+    response.status(500).json({ message: "Loi server" });
+  }
+});
+
+// POST /photos/new — upload ảnh mới cho user đang đăng nhập
+// upload.single("photo") là middleware của multer:
+//   - đọc file từ form-data với field name là "photo"
+//   - lưu file vào thư mục images/ với tên unique
+//   - gán thông tin file vào request.file
+router.post("/new", upload.single("photo"), async (request, response) => {
+  // Đề bài yêu cầu: không có file → trả 400
+  if (!request.file) {
+    return response.status(400).json({ message: "Vui long chon file anh" });
+  }
+
+  try {
+    // Tạo Photo object mới trong DB
+    // file_name chỉ lưu tên file (không lưu full path) — giống format data cũ
+    const newPhoto = new Photo({
+      file_name: request.file.filename,
+      date_time: new Date(),
+      user_id: request.current_user_id, // từ middleware JWT
+      comments: [],
+    });
+
+    await newPhoto.save();
+
+    response.status(200).json({
+      _id: newPhoto._id,
+      file_name: newPhoto.file_name,
+      date_time: newPhoto.date_time,
+      user_id: newPhoto.user_id,
+      comments: [],
+    });
+  } catch (error) {
+    console.error("Loi khi upload anh:", error);
     response.status(500).json({ message: "Loi server" });
   }
 });
