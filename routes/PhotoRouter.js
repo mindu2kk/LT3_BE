@@ -42,7 +42,9 @@ router.get("/:id", async (request, response) => {
 });
 
 // POST /commentsOfPhoto/:photo_id — thêm comment vào ảnh
-router.post("/commentsOfPhoto/:photo_id", async (request, response) => {
+// Lưu ý: prefix "/commentsOfPhoto" đã bị Express cắt bỏ trước khi vào đây
+// nên chỉ cần "/:photo_id" là đủ
+router.post("/:photo_id", async (request, response) => {
   const { photo_id } = request.params;
   const { comment } = request.body;
 
