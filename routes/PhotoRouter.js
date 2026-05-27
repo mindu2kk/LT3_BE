@@ -37,6 +37,46 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({ storage, fileFilter });
 
+// GET /photos/all — lấy tất cả ảnh của tất cả user, kèm thông tin người up
+// Đặt TRƯỚC GET /:id để "all" không bị hiểu là userId
+router.get("/all", async (request, response) => {
+  try {
+    const photos = await Photo.find({})
+      .select("_id user_id file_name date_time")
+      .lean();
+
+    if (!photos || photos.length === 0) {
+      return response.status(200).json([]);
+    }
+
+    // Gom tất cả user_id của ảnh
+    const userIdSet = new Set(photos.map((p) => p.user_id?.toString()).filter(Boolean));
+
+    const users = await User.find({
+      _id: { $in: Array.from(userIdSet) }
+    }).select("_id first_name last_name").lean();
+
+    const userMap = {};
+    users.forEach((u) => { userMap[u._id.toString()] = u; });
+
+    // Gắn thông tin user vào từng ảnh
+    const result = photos.map((photo) => ({
+      _id: photo._id,
+      file_name: photo.file_name,
+      date_time: photo.date_time,
+      user: userMap[photo.user_id?.toString()] || { _id: null, first_name: "Unknown", last_name: "" },
+    }));
+
+    // Sắp xếp mới nhất lên đầu
+    result.sort((a, b) => new Date(b.date_time) - new Date(a.date_time));
+
+    response.status(200).json(result);
+  } catch (error) {
+    console.error("Loi khi lay tat ca anh:", error);
+    response.status(500).json({ message: "Loi server" });
+  }
+});
+
 router.get("/:id", async (request, response) => {
   const userId = request.params.id;
 
