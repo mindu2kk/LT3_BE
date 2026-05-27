@@ -1,74 +1,62 @@
 const express = require("express");
 const Photo = require("../db/photoModel");
-const router = express.Router();
 const User = require("../db/userModel");
+const router = express.Router();
 const mongoose = require("mongoose");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-// Cấu hình multer — xác định nơi lưu file và tên file
+// --- Cấu hình multer để upload ảnh ---
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    // Lưu vào thư mục images/ của backend
+  destination: (_req, _file, cb) => {
     const uploadDir = path.join(__dirname, "../images");
-    // Tạo thư mục nếu chưa có
     if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
     cb(null, uploadDir);
   },
-  filename: function (req, file, cb) {
-    // Tạo tên file duy nhất: timestamp + random + extension gốc
-    // Ví dụ: 1716700000000_a3f2.jpg
-    const uniqueName = Date.now() + "_" + Math.random().toString(36).slice(2, 6)
-      + path.extname(file.originalname);
+  filename: (_req, file, cb) => {
+    const uniqueName = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}${path.extname(file.originalname)}`;
     cb(null, uniqueName);
   },
 });
+const upload = multer({
+  storage,
+  fileFilter: (_req, file, cb) => {
+    const allowed = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    cb(null, allowed.includes(file.mimetype));
+  },
+});
 
-// Chỉ chấp nhận file ảnh
-const fileFilter = (req, file, cb) => {
-  const allowed = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-  if (allowed.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error("Chi chap nhan file anh"), false);
-  }
-};
+// --- Helper: lấy map { userId: userObject } từ danh sách userId ---
+// Dùng chung cho GET /all và GET /:id để tránh lặp code
+async function getUserMap(userIds) {
+  const users = await User.find({ _id: { $in: userIds } })
+    .select("_id first_name last_name")
+    .lean();
+  const map = {};
+  users.forEach((u) => { map[u._id.toString()] = u; });
+  return map;
+}
 
-const upload = multer({ storage, fileFilter });
+const UNKNOWN_USER = { _id: null, first_name: "Unknown", last_name: "" };
 
-// GET /photos/all — lấy tất cả ảnh của tất cả user, kèm thông tin người up
-// Đặt TRƯỚC GET /:id để "all" không bị hiểu là userId
-router.get("/all", async (request, response) => {
+// GET /all — tất cả ảnh kèm thông tin người up, mới nhất trước
+router.get("/all", async (_req, response) => {
   try {
-    const photos = await Photo.find({})
-      .select("_id user_id file_name date_time")
-      .lean();
+    const photos = await Photo.find({}).select("_id user_id file_name date_time").lean();
+    if (!photos.length) return response.status(200).json([]);
 
-    if (!photos || photos.length === 0) {
-      return response.status(200).json([]);
-    }
+    const userIds = [...new Set(photos.map((p) => p.user_id?.toString()).filter(Boolean))];
+    const userMap = await getUserMap(userIds);
 
-    // Gom tất cả user_id của ảnh
-    const userIdSet = new Set(photos.map((p) => p.user_id?.toString()).filter(Boolean));
-
-    const users = await User.find({
-      _id: { $in: Array.from(userIdSet) }
-    }).select("_id first_name last_name").lean();
-
-    const userMap = {};
-    users.forEach((u) => { userMap[u._id.toString()] = u; });
-
-    // Gắn thông tin user vào từng ảnh
-    const result = photos.map((photo) => ({
-      _id: photo._id,
-      file_name: photo.file_name,
-      date_time: photo.date_time,
-      user: userMap[photo.user_id?.toString()] || { _id: null, first_name: "Unknown", last_name: "" },
-    }));
-
-    // Sắp xếp mới nhất lên đầu
-    result.sort((a, b) => new Date(b.date_time) - new Date(a.date_time));
+    const result = photos
+      .map((photo) => ({
+        _id: photo._id,
+        file_name: photo.file_name,
+        date_time: photo.date_time,
+        user: userMap[photo.user_id?.toString()] || UNKNOWN_USER,
+      }))
+      .sort((a, b) => new Date(b.date_time) - new Date(a.date_time));
 
     response.status(200).json(result);
   } catch (error) {
@@ -77,188 +65,63 @@ router.get("/all", async (request, response) => {
   }
 });
 
+// GET /:id — tất cả ảnh của 1 user, kèm comments với thông tin người comment
 router.get("/:id", async (request, response) => {
-  const userId = request.params.id;
+  const { id: userId } = request.params;
 
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     return response.status(400).json({ message: "ID nguoi dung khong hop le" });
   }
 
   try {
-    // Lấy photos, KHÔNG dùng populate — tự xử lý thủ công bên dưới
-    // Lý do: populate phụ thuộc vào tên collection khớp chính xác,
-    // data cũ trong DB có thể có user_id trỏ sai collection → populate trả null
     const photos = await Photo.find({ user_id: userId })
       .select("_id user_id file_name date_time comments")
       .lean();
 
-    if (!photos || photos.length === 0) {
-      return response.status(200).json([]);
-    }
+    if (!photos.length) return response.status(200).json([]);
 
-    // Thu thập tất cả user_id xuất hiện trong comments của tất cả photos
-    const userIdSet = new Set();
+    // Gom tất cả user_id trong comments để query 1 lần
+    const commentUserIds = new Set();
     photos.forEach((photo) => {
-      (photo.comments || []).forEach((comment) => {
-        if (comment.user_id) userIdSet.add(comment.user_id.toString());
+      (photo.comments || []).forEach((c) => {
+        if (c.user_id) commentUserIds.add(c.user_id.toString());
       });
     });
 
-    // Query 1 lần lấy tất cả users liên quan — hiệu quả hơn query từng cái
-    const users = await User.find({
-      _id: { $in: Array.from(userIdSet) }
-    }).select("_id first_name last_name").lean();
+    const userMap = await getUserMap([...commentUserIds]);
 
-    // Tạo map { "user_id_string": userObject } để tra cứu nhanh O(1)
-    const userMap = {};
-    users.forEach((u) => {
-      userMap[u._id.toString()] = u;
-    });
-
-    // Format lại comments — thay user_id bằng thông tin user thực
-    const formattedPhotos = photos.map((photo) => {
-      if (photo.comments && photo.comments.length > 0) {
-        photo.comments = photo.comments.map((comment) => {
-          const userInfo = userMap[comment.user_id?.toString()];
-          return {
-            _id: comment._id,
-            comment: comment.comment,
-            date_time: comment.date_time,
-            user: userInfo || { _id: null, first_name: "Unknown", last_name: "" },
-          };
-        });
-      }
-      return photo;
-    });
+    const formattedPhotos = photos.map((photo) => ({
+      ...photo,
+      comments: (photo.comments || []).map((comment) => ({
+        _id: comment._id,
+        comment: comment.comment,
+        date_time: comment.date_time,
+        user: userMap[comment.user_id?.toString()] || UNKNOWN_USER,
+      })),
+    }));
 
     response.status(200).json(formattedPhotos);
   } catch (error) {
     console.error("Loi khi lay danh sach anh:", error);
-    response.status(500).json({ message: "Loi Server" });
+    response.status(500).json({ message: "Loi server" });
   }
 });
 
-// POST /photos/new — upload ảnh mới cho user đang đăng nhập
-// PHẢI đặt TRƯỚC router.post("/:photo_id") vì Express khớp route theo thứ tự từ trên xuống
-// Nếu đặt sau, request POST /new sẽ bị /:photo_id bắt mất (photo_id = "new")
+// POST /new — upload ảnh mới (phải đặt TRƯỚC /:photo_id)
 router.post("/new", upload.single("photo"), async (request, response) => {
-  // Đề bài yêu cầu: không có file → trả 400
   if (!request.file) {
     return response.status(400).json({ message: "Vui long chon file anh" });
   }
-
   try {
-    const newPhoto = new Photo({
+    const newPhoto = await Photo.create({
       file_name: request.file.filename,
       date_time: new Date(),
       user_id: request.current_user_id,
       comments: [],
     });
-
-    await newPhoto.save();
-
-    response.status(200).json({
-      _id: newPhoto._id,
-      file_name: newPhoto.file_name,
-      date_time: newPhoto.date_time,
-      user_id: newPhoto.user_id,
-      comments: [],
-    });
+    response.status(200).json(newPhoto);
   } catch (error) {
     console.error("Loi khi upload anh:", error);
-    response.status(500).json({ message: "Loi server" });
-  }
-});
-
-// POST /commentsOfPhoto/:photo_id — thêm comment vào ảnh
-// Đặt SAU /new để tránh "new" bị hiểu là photo_id
-router.post("/:photo_id", async (request, response) => {
-  const { photo_id } = request.params;
-  const { comment } = request.body;
-
-  // Đề bài yêu cầu: comment rỗng → trả 400
-  if (!comment || comment.trim() === "") {
-    return response.status(400).json({ message: "Comment khong duoc de trong" });
-  }
-
-  if (!mongoose.Types.ObjectId.isValid(photo_id)) {
-    return response.status(400).json({ message: "ID anh khong hop le" });
-  }
-
-  try {
-    const photo = await Photo.findById(photo_id);
-    if (!photo) {
-      return response.status(404).json({ message: "Khong tim thay anh" });
-    }
-
-    const newComment = {
-      comment: comment.trim(),
-      date_time: new Date(),
-      user_id: request.current_user_id,
-    };
-
-    photo.comments.push(newComment);
-    await photo.save();
-
-    const savedComment = photo.comments[photo.comments.length - 1];
-
-    const user = await User.findById(request.current_user_id)
-      .select("_id first_name last_name");
-
-    response.status(200).json({
-      _id: savedComment._id,
-      comment: savedComment.comment,
-      date_time: savedComment.date_time,
-      user: user,
-    });
-  } catch (error) {
-    console.error("Loi khi them comment:", error);
-    response.status(500).json({ message: "Loi server" });
-  }
-});
-
-// PUT /commentsOfPhoto/:photo_id/:comment_id — sửa nội dung comment
-// Chỉ người tạo comment mới được sửa
-router.put("/:photo_id/:comment_id", async (request, response) => {
-  const { photo_id, comment_id } = request.params;
-  const { comment } = request.body;
-
-  if (!comment || comment.trim() === "") {
-    return response.status(400).json({ message: "Comment khong duoc de trong" });
-  }
-
-  if (!mongoose.Types.ObjectId.isValid(photo_id) || !mongoose.Types.ObjectId.isValid(comment_id)) {
-    return response.status(400).json({ message: "ID khong hop le" });
-  }
-
-  try {
-    const photo = await Photo.findById(photo_id);
-    if (!photo) {
-      return response.status(404).json({ message: "Khong tim thay anh" });
-    }
-
-    // Tìm comment trong mảng comments của photo
-    const commentObj = photo.comments.id(comment_id);
-    if (!commentObj) {
-      return response.status(404).json({ message: "Khong tim thay comment" });
-    }
-
-    // Kiểm tra quyền — chỉ người tạo comment mới được sửa
-    if (commentObj.user_id.toString() !== request.current_user_id.toString()) {
-      return response.status(403).json({ message: "Ban khong co quyen sua comment nay" });
-    }
-
-    // Cập nhật nội dung
-    commentObj.comment = comment.trim();
-    await photo.save();
-
-    response.status(200).json({
-      _id: commentObj._id,
-      comment: commentObj.comment,
-      date_time: commentObj.date_time,
-    });
-  } catch (error) {
-    console.error("Loi khi sua comment:", error);
     response.status(500).json({ message: "Loi server" });
   }
 });

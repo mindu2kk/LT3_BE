@@ -1,5 +1,6 @@
 const express = require("express");
 const User = require("../db/userModel");
+const Photo = require("../db/photoModel");
 const router = express.Router();
 const mongoose = require("mongoose");
 
@@ -73,19 +74,11 @@ router.get("/list", async (request, response) => {
 // Đặt TRƯỚC /:id để "photo-counts" không bị hiểu là userId
 router.get("/photo-counts", async (request, response) => {
   try {
-    const Photo = require("../db/photoModel");
-
-    // aggregate: nhóm ảnh theo user_id rồi đếm
     const counts = await Photo.aggregate([
       { $group: { _id: "$user_id", count: { $sum: 1 } } }
     ]);
-
-    // Chuyển thành map { "userId": count } để frontend dùng dễ hơn
     const result = {};
-    counts.forEach((item) => {
-      result[item._id.toString()] = item.count;
-    });
-
+    counts.forEach((item) => { result[item._id.toString()] = item.count; });
     response.status(200).json(result);
   } catch (error) {
     console.error("Loi khi dem anh:", error);
