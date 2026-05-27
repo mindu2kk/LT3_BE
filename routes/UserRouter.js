@@ -68,6 +68,31 @@ router.get("/list", async (request, response) => {
   }
 });
 
+// GET /user/photo-counts — trả về số ảnh của từng user
+// Dùng MongoDB aggregation để đếm trực tiếp trong DB — hiệu quả hơn load hết ảnh về đếm
+// Đặt TRƯỚC /:id để "photo-counts" không bị hiểu là userId
+router.get("/photo-counts", async (request, response) => {
+  try {
+    const Photo = require("../db/photoModel");
+
+    // aggregate: nhóm ảnh theo user_id rồi đếm
+    const counts = await Photo.aggregate([
+      { $group: { _id: "$user_id", count: { $sum: 1 } } }
+    ]);
+
+    // Chuyển thành map { "userId": count } để frontend dùng dễ hơn
+    const result = {};
+    counts.forEach((item) => {
+      result[item._id.toString()] = item.count;
+    });
+
+    response.status(200).json(result);
+  } catch (error) {
+    console.error("Loi khi dem anh:", error);
+    response.status(500).json({ message: "Loi server" });
+  }
+});
+
 router.get("/:id", async (request, response) => {
   const userId = request.params.id;
 
