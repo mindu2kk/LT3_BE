@@ -98,7 +98,6 @@ router.get("/:id", async (request, response) => {
       "_id first_name last_name location description occupation"
     );
 
-    // ID hợp lệ nhưng không tồn tại trong DB → 404 Not Found (không phải 400)
     if (!user) {
       return response.status(404).json({ message: "Khong tim thay nguoi nay" });
     }
@@ -106,6 +105,70 @@ router.get("/:id", async (request, response) => {
     response.status(200).json(user);
   } catch (error) {
     console.error("Loi khi lay chi tiet nguoi dung:", error);
+    response.status(500).json({ message: "Loi server" });
+  }
+});
+
+// PUT /user/:id — cập nhật hồ sơ cá nhân
+// Chỉ cho phép user sửa hồ sơ của chính mình
+router.put("/:id", async (request, response) => {
+  const { id } = request.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return response.status(400).json({ message: "ID nguoi dung khong hop le" });
+  }
+
+  // Lấy token từ header để xác định người đang đăng nhập
+  const token = request.headers["authorization"]?.split(" ")[1];
+  if (!token) {
+    return response.status(401).json({ message: "Ban chua dang nhap" });
+  }
+
+  const jwt = require("jsonwebtoken");
+  const { JWT_SECRET } = require("../config");
+
+  let currentUserId;
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    currentUserId = decoded.user_id;
+  } catch {
+    return response.status(401).json({ message: "Token khong hop le" });
+  }
+
+  // Chỉ được sửa hồ sơ của chính mình
+  if (id !== currentUserId.toString()) {
+    return response.status(403).json({ message: "Ban khong co quyen sua ho so nay" });
+  }
+
+  const { first_name, last_name, location, description, occupation } = request.body;
+
+  if (!first_name || !first_name.trim()) {
+    return response.status(400).json({ message: "First name khong duoc de trong" });
+  }
+  if (!last_name || !last_name.trim()) {
+    return response.status(400).json({ message: "Last name khong duoc de trong" });
+  }
+
+  try {
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
+      {
+        first_name: first_name.trim(),
+        last_name: last_name.trim(),
+        location: location || "",
+        description: description || "",
+        occupation: occupation || "",
+      },
+      { new: true } // trả về document sau khi update
+    ).select("_id first_name last_name location description occupation login_name");
+
+    if (!updatedUser) {
+      return response.status(404).json({ message: "Khong tim thay nguoi dung" });
+    }
+
+    response.status(200).json(updatedUser);
+  } catch (error) {
+    console.error("Loi khi cap nhat ho so:", error);
     response.status(500).json({ message: "Loi server" });
   }
 });
