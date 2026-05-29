@@ -75,7 +75,7 @@ router.get("/:id", async (request, response) => {
 
   try {
     const photos = await Photo.find({ user_id: userId })
-      .select("_id user_id file_name date_time comments")
+      .select("_id user_id file_name date_time comments likes")
       .lean();
 
     if (!photos.length) return response.status(200).json([]);
@@ -92,6 +92,7 @@ router.get("/:id", async (request, response) => {
 
     const formattedPhotos = photos.map((photo) => ({
       ...photo,
+      likes: photo.likes || [],
       comments: (photo.comments || []).map((comment) => ({
         _id: comment._id,
         comment: comment.comment,
@@ -122,6 +123,42 @@ router.post("/new", upload.single("photo"), async (request, response) => {
     response.status(200).json(newPhoto);
   } catch (error) {
     console.error("Loi khi upload anh:", error);
+    response.status(500).json({ message: "Loi server" });
+  }
+});
+
+// POST /photos/:id/like — toggle like/unlike ảnh
+// Nếu đã like → unlike, chưa like → like
+router.post("/:id/like", async (request, response) => {
+  const { id: photoId } = request.params;
+  const userId = request.current_user_id;
+
+  if (!mongoose.Types.ObjectId.isValid(photoId)) {
+    return response.status(400).json({ message: "ID anh khong hop le" });
+  }
+
+  try {
+    const photo = await Photo.findById(photoId);
+    if (!photo) return response.status(404).json({ message: "Khong tim thay anh" });
+
+    const alreadyLiked = photo.likes.some((id) => id.toString() === userId.toString());
+
+    if (alreadyLiked) {
+      // Đã like → bỏ like (lọc ra userId khỏi mảng)
+      photo.likes = photo.likes.filter((id) => id.toString() !== userId.toString());
+    } else {
+      // Chưa like → thêm vào
+      photo.likes.push(userId);
+    }
+
+    await photo.save();
+
+    response.status(200).json({
+      likes: photo.likes.length,           // tổng số like
+      liked: !alreadyLiked,                // trạng thái mới của user này
+    });
+  } catch (error) {
+    console.error("Loi khi like anh:", error);
     response.status(500).json({ message: "Loi server" });
   }
 });
