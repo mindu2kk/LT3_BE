@@ -79,4 +79,34 @@ router.put("/:photo_id/:comment_id", async (request, response) => {
   }
 });
 
+// DELETE /:photo_id/:comment_id — xóa comment (chỉ người tạo mới được xóa)
+router.delete("/:photo_id/:comment_id", async (request, response) => {
+  const { photo_id, comment_id } = request.params;
+
+  if (!mongoose.Types.ObjectId.isValid(photo_id) || !mongoose.Types.ObjectId.isValid(comment_id)) {
+    return response.status(400).json({ message: "ID khong hop le" });
+  }
+
+  try {
+    const photo = await Photo.findById(photo_id);
+    if (!photo) return response.status(404).json({ message: "Khong tim thay anh" });
+
+    const commentObj = photo.comments.id(comment_id);
+    if (!commentObj) return response.status(404).json({ message: "Khong tim thay comment" });
+
+    if (commentObj.user_id.toString() !== request.current_user_id.toString()) {
+      return response.status(403).json({ message: "Ban khong co quyen xoa comment nay" });
+    }
+
+    photo.comments.pull({ _id: comment_id });
+    await photo.save();
+
+    // Trả về comment_id vừa xóa để frontend biết cần xóa cái nào khỏi state
+    response.status(200).json({ deleted_id: comment_id });
+  } catch (error) {
+    console.error("Loi khi xoa comment:", error);
+    response.status(500).json({ message: "Loi server" });
+  }
+});
+
 module.exports = router;
