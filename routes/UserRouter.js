@@ -1,38 +1,27 @@
 const express = require("express");
 const User = require("../db/userModel");
+const Photo = require("../db/photoModel");
 const router = express.Router();
 const mongoose = require("mongoose");
+const jwt = require("jsonwebtoken");
+const { JWT_SECRET } = require("../config");
 
-// POST /user — đăng ký user mới
-// Đặt TRƯỚC GET /:id để "POST /" không bị nhầm với GET /:id
+// POST / — đăng ký user mới (không cần đăng nhập)
 router.post("/", async (request, response) => {
   const { login_name, password, first_name, last_name, location, description, occupation } = request.body;
 
-  // Kiểm tra các field bắt buộc theo đề bài
-  if (!login_name || !login_name.trim()) {
-    return response.status(400).json({ message: "login_name khong duoc de trong" });
-  }
-  if (!password || !password.trim()) {
-    return response.status(400).json({ message: "Password khong duoc de trong" });
-  }
-  if (!first_name || !first_name.trim()) {
-    return response.status(400).json({ message: "First name khong duoc de trong" });
-  }
-  if (!last_name || !last_name.trim()) {
-    return response.status(400).json({ message: "Last name khong duoc de trong" });
-  }
+  if (!login_name?.trim()) return response.status(400).json({ message: "login_name khong duoc de trong" });
+  if (!password?.trim()) return response.status(400).json({ message: "Password khong duoc de trong" });
+  if (!first_name?.trim()) return response.status(400).json({ message: "First name khong duoc de trong" });
+  if (!last_name?.trim()) return response.status(400).json({ message: "Last name khong duoc de trong" });
 
   try {
-    // Kiểm tra login_name đã tồn tại chưa
     const existing = await User.findOne({ login_name: login_name.trim() });
-    if (existing) {
-      return response.status(400).json({ message: "Ten dang nhap nay da ton tai" });
-    }
+    if (existing) return response.status(400).json({ message: "Ten dang nhap nay da ton tai" });
 
-    // Tạo user mới
-    const newUser = new User({
+    const newUser = await User.create({
       login_name: login_name.trim(),
-      password: password,       // đề bài lưu plain text, không yêu cầu hash
+      password,
       first_name: first_name.trim(),
       last_name: last_name.trim(),
       location: location || "",
@@ -40,9 +29,6 @@ router.post("/", async (request, response) => {
       occupation: occupation || "",
     });
 
-    await newUser.save();
-
-    // Đề bài yêu cầu response phải có login_name
     response.status(200).json({
       _id: newUser._id,
       login_name: newUser.login_name,
@@ -55,39 +41,101 @@ router.post("/", async (request, response) => {
   }
 });
 
-router.get("/list", async (request, response) => {
+// GET /list — danh sách tất cả user (không cần đăng nhập)
+router.get("/list", async (_req, response) => {
   try {
-    const usersList = await User.find({}).select("_id first_name last_name");
-
-    response.status(200).json(usersList);
+    const users = await User.find({}).select("_id first_name last_name");
+    response.status(200).json(users);
   } catch (error) {
-    console.error("Loi khi tai danh sach nguoi dung:", error);
-    response
-      .status(500)
-      .json({ message: "Da xay ra loi he thong phia server" });
+    response.status(500).json({ message: "Loi server" });
   }
 });
 
-router.get("/:id", async (request, response) => {
-  const userId = request.params.id;
+// GET /photo-counts — số ảnh của từng user (không cần đăng nhập)
+// Đặt TRƯỚC /:id để "photo-counts" không bị hiểu là userId
+router.get("/photo-counts", async (_req, response) => {
+  try {
+    const counts = await Photo.aggregate([
+      { $group: { _id: "$user_id", count: { $sum: 1 } } }
+    ]);
+    const result = {};
+    counts.forEach((item) => { result[item._id.toString()] = item.count; });
+    response.status(200).json(result);
+  } catch (error) {
+    response.status(500).json({ message: "Loi server" });
+  }
+});
 
-  if (!mongoose.Types.ObjectId.isValid(userId)) {
+// GET /search?q=... — tìm user theo tên (không cần đăng nhập)
+// Đặt TRƯỚC /:id để "search" không bị hiểu là userId
+router.get("/search", async (request, response) => {
+  const { q } = request.query;
+  if (!q?.trim()) return response.status(400).json({ message: "Vui long nhap tu khoa" });
+
+  try {
+    const users = await User.find({
+      $or: [
+        { first_name: { $regex: q.trim(), $options: "i" } },
+        { last_name:  { $regex: q.trim(), $options: "i" } },
+      ],
+    }).select("_id first_name last_name occupation");
+    response.status(200).json(users);
+  } catch (error) {
+    response.status(500).json({ message: "Loi server" });
+  }
+});
+
+// GET /:id — chi tiết 1 user (không cần đăng nhập)
+router.get("/:id", async (request, response) => {
+  const { id } = request.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return response.status(400).json({ message: "ID nguoi dung khong hop le" });
+  }
+  try {
+    const user = await User.findById(id).select("_id first_name last_name location description occupation");
+    if (!user) return response.status(404).json({ message: "Khong tim thay nguoi nay" });
+    response.status(200).json(user);
+  } catch (error) {
+    response.status(500).json({ message: "Loi server" });
+  }
+});
+
+// PUT /:id — cập nhật hồ sơ (chỉ người dùng của chính mình)
+router.put("/:id", async (request, response) => {
+  const { id } = request.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
     return response.status(400).json({ message: "ID nguoi dung khong hop le" });
   }
 
+  // Xác thực token để biết ai đang gọi
+  const token = request.headers["authorization"]?.split(" ")[1];
+  if (!token) return response.status(401).json({ message: "Ban chua dang nhap" });
+
+  let currentUserId;
   try {
-    const user = await User.findById(userId).select(
-      "_id first_name last_name location description occupation"
-    );
+    currentUserId = jwt.verify(token, JWT_SECRET).user_id;
+  } catch {
+    return response.status(401).json({ message: "Token khong hop le" });
+  }
 
-    // ID hợp lệ nhưng không tồn tại trong DB → 404 Not Found (không phải 400)
-    if (!user) {
-      return response.status(404).json({ message: "Khong tim thay nguoi nay" });
-    }
+  if (id !== currentUserId.toString()) {
+    return response.status(403).json({ message: "Ban khong co quyen sua ho so nay" });
+  }
 
-    response.status(200).json(user);
+  const { first_name, last_name, location, description, occupation } = request.body;
+  if (!first_name?.trim()) return response.status(400).json({ message: "First name khong duoc de trong" });
+  if (!last_name?.trim()) return response.status(400).json({ message: "Last name khong duoc de trong" });
+
+  try {
+    const updated = await User.findByIdAndUpdate(
+      id,
+      { first_name: first_name.trim(), last_name: last_name.trim(), location, description, occupation },
+      { new: true }
+    ).select("_id first_name last_name location description occupation login_name");
+
+    if (!updated) return response.status(404).json({ message: "Khong tim thay nguoi dung" });
+    response.status(200).json(updated);
   } catch (error) {
-    console.error("Loi khi lay chi tiet nguoi dung:", error);
     response.status(500).json({ message: "Loi server" });
   }
 });
